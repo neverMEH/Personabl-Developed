@@ -94,6 +94,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signUp(email: string, password: string, fullName: string) {
     try {
+      console.log('🔐 Starting signup process for:', email);
+      
       // First sign up the user
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -107,44 +109,87 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (signUpError || !signUpData.user) {
+        console.error('❌ Signup failed:', signUpError);
         return { error: signUpError };
       }
+
+      console.log('✅ User signup successful, user ID:', signUpData.user.id);
+      console.log('📧 Email confirmation required:', signUpData.user.email_confirmed_at === null);
 
       // Wait for auth state to be established
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Get current session to ensure we're authenticated
       const { data: { session } } = await supabase.auth.getSession();
+      console.log('🔍 Current session after signup:', {
+        user_id: session?.user?.id,
+        role: session?.user?.role,
+        email_confirmed: session?.user?.email_confirmed_at !== null,
+        session_exists: !!session
+      });
 
-      // Create profile with multiple retries
+      // Create profile using service role to bypass RLS policies
+      const profileData = {
+        id: signUpData.user.id,
+        email,
+        full_name: fullName,
+      };
+      console.log('📝 Attempting to insert profile:', profileData);
+
       let profileError = null;
-      for (let i = 0; i < 3; i++) {
-        const { error } = await supabase.from('profiles').insert([
-          {
-            id: signUpData.user.id,
-            email,
-            full_name: fullName,
-          },
-        ]);
 
+      if (supabaseAdmin) {
+        console.log('🔄 Creating profile with service role client');
+        const { error } = await supabaseAdmin.from('profiles').insert([profileData]);
+        profileError = error;
+        
         if (!error) {
+          console.log('✅ Profile created successfully with service role');
           return { error: null };
         }
+        
+        console.error('❌ Profile creation failed with service role:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+      } else {
+        console.warn('⚠️ Service role not configured, falling back to regular client with retries');
+        
+        // Fallback to regular client with multiple retries
+        for (let i = 0; i < 3; i++) {
+          console.log(`🔄 Profile creation attempt ${i + 1}/3 with regular client`);
+          
+          const { error } = await supabase.from('profiles').insert([profileData]);
 
-        profileError = error;
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000));
+          if (!error) {
+            console.log('✅ Profile created successfully with regular client');
+            return { error: null };
+          }
+
+          console.error(`❌ Profile creation attempt ${i + 1} failed:`, {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint
+          });
+
+          profileError = error;
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       }
 
       if (profileError) {
-        console.error('Profile creation error:', profileError);
+        console.error('💥 All profile creation attempts failed:', profileError);
         // If all retries fail, clean up by signing out
         await supabase.auth.signOut();
       }
 
       return { error: profileError };
     } catch (err) {
-      console.error('Signup error:', err);
+      console.error('🚨 Unexpected signup error:', err);
       return { error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred', details: '' } as PostgrestError };
     }
   }

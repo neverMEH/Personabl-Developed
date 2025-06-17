@@ -35,7 +35,5 @@ create policy "Service role can manage all profiles"
   on profiles for all
   using (auth.jwt() ->> 'role' = 'service_role');
 
--- Add a default policy to deny all other operations
-create policy "Deny all by default"
-  on profiles for all
-  using (false);
+-- Note: Removed "Deny all by default" policy as it may interfere with other policies
+-- RLS will deny by default if no policies match
