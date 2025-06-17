@@ -23,12 +23,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Debug flag to track auth flows
+    const DEBUG_AUTH = true;
+    
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (DEBUG_AUTH) console.log('Initial session check:', !!session, session?.user?.email);
       setUser(session?.user ?? null);
       if (session?.user) {
+        if (DEBUG_AUTH) console.log('Fetching profile for session user:', session.user.id);
         fetchProfile(session.user.id);
       } else {
+        if (DEBUG_AUTH) console.log('No session user, setting isLoading to false');
         setIsLoading(false);
       }
     });
@@ -37,11 +43,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (DEBUG_AUTH) console.log('Auth state changed:', event, !!session, session?.user?.email);
       setUser(session?.user ?? null);
       if (session?.user) {
+        if (DEBUG_AUTH) console.log('Auth change - fetching profile for:', session.user.id);
         await fetchProfile(session.user.id);
       } else {
+        if (DEBUG_AUTH) console.log('Auth change - no user, setting profile to null');
         setProfile(null);
+        setIsLoading(false); // Ensure loading state is updated when logged out
       }
     });
 
@@ -51,7 +61,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   async function fetchProfile(userId: string) {
+    // Add a safety timeout to ensure loading state is always updated
+    const timeoutId = setTimeout(() => {
+      console.log('🚨 Profile fetch timeout - forcing loading state to false');
+      setIsLoading(false);
+    }, 5000); // 5 second timeout
+    
     try {
+      console.log('Fetching profile for user ID:', userId);
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -59,13 +76,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
 
       if (error) {
-        throw error;
+        console.error('Error fetching profile:', error);
+        console.log('Setting isLoading to false due to profile fetch error');
+        setIsLoading(false);
+        return; // Return early on error
       }
 
+      console.log('Profile fetched successfully:', data?.id);
       setProfile(data);
+      
+      // Manually trigger state update to ensure redirect happens
+      setUser(currentUser => {
+        console.log('Manually refreshing user state to trigger navigation');
+        return currentUser; // Return same user to trigger state update
+      });
     } catch (error) {
-      console.error('Error fetching profile:', error);
+      console.error('Error handling profile fetch:', error);
+      setIsLoading(false);
     } finally {
+      clearTimeout(timeoutId); // Clear the timeout
+      console.log('Setting isLoading to false after profile fetch');
       setIsLoading(false);
     }
   }

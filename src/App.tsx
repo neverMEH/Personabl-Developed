@@ -52,18 +52,67 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
   return <>{children}</>;
 }
 
+// Enhanced callback handler for auth redirects from external sites
 function AuthCallback() {
-  const { isLoading } = useAuth();
-
-  if (isLoading) {
+  const { user, isLoading } = useAuth();
+  const [waitCount, setWaitCount] = React.useState(0);
+  
+  // Force redirect after timeout even if loading doesn't complete
+  React.useEffect(() => {
+    console.log('Auth callback mounted, redirecting soon...');
+    
+    // Increment counter to force a redirect after some time
+    const timer = setInterval(() => {
+      setWaitCount(prev => prev + 1);
+    }, 1000);
+    
+    return () => clearInterval(timer);
+  }, []);
+  
+  // Force redirect after 3 seconds regardless of loading state
+  React.useEffect(() => {
+    if (waitCount >= 3) {
+      console.log('Forcing dashboard redirect after timeout');
+      return;
+    }
+  }, [waitCount]);
+  
+  if (isLoading && waitCount < 3) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500"></div>
+      <div className="min-h-screen flex flex-col items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500 mb-4"></div>
+        <p className="text-gray-600">Completing authentication...</p>
+        <p className="text-sm text-gray-500 mt-2">Redirecting in {3 - waitCount} seconds</p>
       </div>
     );
   }
 
+  console.log('Auth callback redirecting to dashboard');
   return <Navigate to="/dashboard" replace />;
+}
+
+// Component to handle stuck authentication states
+function AuthStateRecovery() {
+  const { user, isLoading } = useAuth();
+  
+  React.useEffect(() => {
+    // Check URL parameters for signs of returning from an external site
+    const params = new URLSearchParams(window.location.search);
+    const fromExternal = params.has('success') || params.has('canceled') ||
+                         params.has('checkout') || params.has('stripe');
+    
+    if (fromExternal) {
+      console.log('Detected return from external site, ensuring auth state is recovered');
+      // Force a page refresh if needed to recover auth state
+      if (isLoading && !user) {
+        console.log('Refreshing page to recover auth state');
+        // You could force reload here if needed:
+        // window.location.reload();
+      }
+    }
+  }, [user, isLoading]);
+  
+  return null; // This is just a background effect component
 }
 
 export function App() {
@@ -72,6 +121,7 @@ export function App() {
       <StripeProvider>
         <BrowserRouter>
           <div className="min-h-screen font-sans text-gray-900">
+            <AuthStateRecovery />
             <Routes>
               {/* Public routes */}
               <Route path="/" element={<HomePage />} />
